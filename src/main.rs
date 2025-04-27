@@ -11,7 +11,7 @@ struct Args {
     #[clap(short, long, help = "Search term")]
     search: Option<String>,
     #[clap(short, long, help = "List all available programs")]
-    list: Option<String>,
+    list: bool,
     #[clap(short, long, help = "Update installed programs")]
     update: Option<String>,
 }
@@ -61,9 +61,6 @@ fn fetch_list(conf_file: &str) -> Vec<App> {
         serde_json::from_str(&body).expect("Failed to parse apps list as json");
     let apps_vec: Vec<App> = serde_json::from_value(apps_json["apps"].clone())
         .expect("Failed to parse apps list as Vec<App>");
-    for app in &apps_vec {
-        println!("{}", app.name);
-    }
     apps_vec
 }
 
@@ -72,9 +69,12 @@ fn main() {
     // Get $HOME
     let home = env::var("HOME").expect("Could not determine home directory");
     let conf_dir = format!("{}/.config", home);
+    let cache_dir = format!("{}/.cache", home);
     let conf_file = format!("{}/fkinstall.conf", conf_dir);
     check_config(&conf_dir, &conf_file);
     let project_list = fetch_list(&conf_file);
+
+    // Search
     if let Some(search_term) = &args.search {
         println!("Search results for '{}' :", search_term);
         for app in project_list
@@ -82,6 +82,13 @@ fn main() {
             .filter(|app| app.name.contains(search_term))
         {
             println!("{}", app.name);
+        }
+    }
+    // List
+    else if args.list {
+        println!("Available programs:");
+        for app in project_list {
+            println!("- {}", app.name);
         }
     }
 }
