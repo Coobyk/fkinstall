@@ -1,6 +1,7 @@
 use clap::Parser;
 use std::env;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 #[derive(Parser, Debug, Clone)]
@@ -91,4 +92,72 @@ fn main() {
             println!("- {}", app.name);
         }
     }
+    // Install
+    else if let Some(install) = &args.install {
+        let app_opt = project_list.iter().find(|app| app.name == *install);
+        if let Some(app) = app_opt {
+            let url_parts: Vec<&str> = app.url.trim_end_matches(".git").split('/').collect();
+            if url_parts.len() >= 2 {
+                let owner = url_parts[url_parts.len() - 2];
+                let repo = url_parts[url_parts.len() - 1];
+                let client = reqwest::blocking::Client::new();
+                // Fetch all releases and pick the most recent linux release
+                let api_url = format!("https://api.github.com/repos/{}/{}/releases", owner, repo);
+                let resp = client
+                    .get(&api_url)
+                    .header("User-Agent", "fkinstall")
+                    .send()
+                    .expect("Failed to fetch releases");
+                let releases: Vec<serde_json::Value> =
+                    resp.json().expect("Failed to parse releases JSON");
+                // Select the first Linux release by tag_name
+                if let Some(rel) = releases.iter().find(|rel| {
+                    rel["tag_name"].as_str().unwrap_or("")
+                        .to_lowercase()
+                        .contains("linux")
+                }) {
+                    let assets = rel["assets"].as_array().expect("No assets in release");
+                    // Find the asset matching the program name
+                    if let Some(asset) = assets.iter().find(|asset| {
+                        asset["name"].as_str().unwrap_or("") == *install
+                    }) {
+                        let asset_name = asset["name"].as_str().unwrap();
+                        let download_url = asset["browser_download_url"].as_str().unwrap();
+                        let bin_dir = format!("{}/.dev/bin", home);
+                        if !Path::new(&bin_dir).exists() {
+                            fs::create_dir_all(&bin_dir).expect("Failed to create bin dir");
+                        }
+                        let dest_path = format!("{}/{}", bin_dir, asset_name);
+                        if Path::new(&dest_path).exists() {
+                            fs::remove_file(&dest_path).expect("Failed to remove existing file");
+                        }
+                        let resp2 = client
+                            .get(download_url)
+                            .header("User-Agent", "fkinstall")
+                            .send()
+                            .expect("Failed to download asset");
+                        let bytes = resp2.bytes().expect("Failed to read asset bytes");
+                        fs::write(&dest_path, &bytes).expect("Failed to write binary");
+                        let mut perms = fs::metadata(&dest_path)
+                            .expect("Failed to get metadata")
+                            .permissions();
+                        perms.set_mode(0o755);
+                        fs::set_permissions(&dest_path, perms).expect("Failed to set permissions");
+                        println!("Installed {} to {}", asset_name, dest_path);
+                    } else {
+                        eprintln!("No asset named '{}' in the Linux release", install);
+                    }
+                } else {
+                    eprintln!("No Linux release found for this repository");
+                }
+            } else {
+                eprintln!("Invalid GitHub URL: {}", app.url);
+            }
+        } else {
+            eprintln!("App '{}' not found", install);
+        }
+    }
+
+    // Update
+    
 }
