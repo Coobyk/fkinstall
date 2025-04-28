@@ -112,15 +112,18 @@ fn main() {
                     resp.json().expect("Failed to parse releases JSON");
                 // Select the first Linux release by tag_name
                 if let Some(rel) = releases.iter().find(|rel| {
-                    rel["tag_name"].as_str().unwrap_or("")
+                    rel["tag_name"]
+                        .as_str()
+                        .unwrap_or("")
                         .to_lowercase()
                         .contains("linux")
                 }) {
                     let assets = rel["assets"].as_array().expect("No assets in release");
                     // Find the asset matching the program name
-                    if let Some(asset) = assets.iter().find(|asset| {
-                        asset["name"].as_str().unwrap_or("") == *install
-                    }) {
+                    if let Some(asset) = assets
+                        .iter()
+                        .find(|asset| asset["name"].as_str().unwrap_or("") == *install)
+                    {
                         let asset_name = asset["name"].as_str().unwrap();
                         let download_url = asset["browser_download_url"].as_str().unwrap();
                         let bin_dir = format!("{}/.dev/bin", home);
@@ -157,7 +160,71 @@ fn main() {
             eprintln!("App '{}' not found", install);
         }
     }
-
     // Update
-    
+    else if let Some(_u) = &args.update {
+        let bin_dir = format!("{}/.dev/bin", home);
+        if Path::new(&bin_dir).exists() {
+            println!("Updating installed programs in {}", bin_dir);
+            for entry in fs::read_dir(&bin_dir).expect("Failed to read bin directory") {
+                if let Ok(entry) = entry {
+                    if let Some(name) = entry.file_name().to_str() {
+                        if let Some(app) = project_list.iter().find(|a| a.name == name) {
+                            let parts: Vec<&str> =
+                                app.url.trim_end_matches(".git").split('/').collect();
+                            if parts.len() >= 2 {
+                                let owner = parts[parts.len() - 2];
+                                let repo = parts[parts.len() - 1];
+                                let client = reqwest::blocking::Client::new();
+                                let api = format!(
+                                    "https://api.github.com/repos/{}/{}/releases",
+                                    owner, repo
+                                );
+                                let resp = client
+                                    .get(&api)
+                                    .header("User-Agent", "fkinstall")
+                                    .send()
+                                    .expect("Failed to fetch releases");
+                                let rels: Vec<serde_json::Value> =
+                                    resp.json().expect("Failed to parse releases");
+                                if let Some(rel) = rels.iter().find(|r| {
+                                    r["tag_name"]
+                                        .as_str()
+                                        .unwrap_or("")
+                                        .to_lowercase()
+                                        .contains("linux")
+                                }) {
+                                    let assets = rel["assets"].as_array().expect("No assets");
+                                    if let Some(asset) = assets
+                                        .iter()
+                                        .find(|a| a["name"].as_str().unwrap_or("") == name)
+                                    {
+                                        let url = asset["browser_download_url"].as_str().unwrap();
+                                        let dest = format!("{}/{}", bin_dir, name);
+                                        if Path::new(&dest).exists() {
+                                            fs::remove_file(&dest).expect("rm failed");
+                                        }
+                                        let b = client
+                                            .get(url)
+                                            .header("User-Agent", "fkinstall")
+                                            .send()
+                                            .expect("dl")
+                                            .bytes()
+                                            .expect("bytes");
+                                        fs::write(&dest, &b).expect("write");
+                                        let mut p =
+                                            fs::metadata(&dest).expect("meta").permissions();
+                                        p.set_mode(0o755);
+                                        fs::set_permissions(&dest, p).expect("chmod");
+                                        println!("Updated {}", name);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            println!("No .dev/bin at {}", bin_dir);
+        }
+    }
 }
