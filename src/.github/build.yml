@@ -1,0 +1,46 @@
+name: CI
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+permissions:
+    contents: write
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v3
+
+            - name: Set up Rust
+              uses: actions-rs/toolchain@v1
+              with:
+                  toolchain: stable
+
+            - name: Build release binary
+              run: |
+                  cargo build --release --target x86_64-unknown-linux-gnu
+
+            - name: Test listing binary
+              run: |
+                  echo "Testing listing via compiled binary"
+                  chmod +x target/x86_64-unknown-linux-gnu/release/fkinstall
+                  ./target/x86_64-unknown-linux-gnu/release/fkinstall -l || (echo 'Test failed' && exit 1)
+
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: fkinstall-x86_64-unknown-linux-gnu
+                  path: |
+                      target/x86_64-unknown-linux-gnu/release/fkinstall
+
+            # Create GitHub release and attach built binary
+            - name: Create GitHub Release
+              uses: softprops/action-gh-release@v1
+              with:
+                  tag_name: v${{ github.run_number }}-x86_64-unknown-linux-gnu
+                  name: Release ${{ github.run_number }} (x86_64-unknown-linux-gnu)
+                  files: |
+                      target/x86_64-unknown-linux-gnu/release/fkinstall
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
